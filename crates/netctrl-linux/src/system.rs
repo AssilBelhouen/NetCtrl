@@ -167,14 +167,11 @@ pub fn capabilities() -> Capabilities {
                 Capability::MissingDependency(e.to_string())
             })
     };
-    let capture = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("netctrl-capture")))
-        .filter(|p| p.is_file())
-        .map_or(
-            Capability::MissingDependency("installed netctrl-capture and libpcap runtime".into()),
-            |_| privcap.clone(),
-        );
+    let capture = if Path::new("/usr/local/libexec/netctrl/netctrl-capture").is_file() {
+        privcap.clone()
+    } else {
+        Capability::MissingDependency("installed netctrl-capture and libpcap runtime".into())
+    };
     Capabilities {
         discovery: Capability::Available,
         capture,
