@@ -85,9 +85,13 @@ pub fn run(name: &str, args: &[String]) -> Result<String> {
         .map_err(|_| Error::Backend("stderr reader panicked".into()))??;
     if !status.success() {
         return Err(Error::Backend(format!(
-            "{name} {}: {}",
+            "{name} {}: {}; {}",
             args.join(" "),
-            String::from_utf8_lossy(&err)
+            String::from_utf8_lossy(&err),
+            String::from_utf8_lossy(&out)
+                .chars()
+                .take(2048)
+                .collect::<String>()
         )));
     }
     Ok(String::from_utf8_lossy(&out).into_owned())

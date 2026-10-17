@@ -37,6 +37,11 @@ pub fn parse_ethernet(data: &[u8], wire_len: u32) -> Result<Option<PacketSummary
         0x0800 => {
             let ip = etherparse::Ipv4HeaderSlice::from_slice(data)
                 .map_err(|e| Error::Invalid(e.to_string()))?;
+            if usize::from(ip.total_len()) < ip.slice().len() {
+                return Err(Error::Invalid(
+                    "IPv4 datagram length is shorter than its header".into(),
+                ));
+            }
             (
                 IpAddr::V4(ip.source_addr()),
                 IpAddr::V4(ip.destination_addr()),

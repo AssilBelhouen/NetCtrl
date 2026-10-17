@@ -97,12 +97,34 @@ fn ipt(a: &[&str]) -> Result<String> {
     v.extend(args(a));
     run("iptables", &v)
 }
+fn validate_routing_rules() -> Result<()> {
+    let rules = json("ip", &args(&["-j", "-4", "rule", "show"]))?;
+    for r in values(&rules) {
+        let ordinary = matches!(
+            (r["priority"].as_u64(), r["table"].as_str()),
+            (Some(0), Some("local")) | (Some(32766), Some("main")) | (Some(32767), Some("default"))
+        );
+        if !ordinary
+            || r["src"] != "all"
+            || r.as_object().is_none_or(|o| {
+                o.keys()
+                    .any(|k| !["priority", "src", "table", "protocol"].contains(&k.as_str()))
+            })
+        {
+            return Err(Error::Unsupported(
+                "custom IPv4 policy-routing rules require manual integration".into(),
+            ));
+        }
+    }
+    Ok(())
+}
 
 pub async fn preflight(plan: &SessionPlan) -> Result<Vec<String>> {
     if !root() {
         return Err(Error::Permission("privileged helper required".into()));
     }
     discovery::revalidate(plan).await?;
+    validate_routing_rules()?;
     capture_binary()?;
     if !ipt(&["--version"])?.contains("nf_tables") {
         return Err(Error::Unsupported(
@@ -390,7 +412,9 @@ impl Session {
                     "alias",
                     &format!("netctrl:{token}"),
                     "mtu",
-                    &self.journal.plan.interface.mtu.to_string(),
+                    // Accept oversized ingress until IPv4 routing can fragment it
+                    // or generate ICMP fragmentation-needed on the physical egress.
+                    "65535",
                     "up",
                 ]),
             )?;
@@ -537,6 +561,21 @@ impl Session {
             return Err(Error::Backend("forwarding readback failed".into()));
         }
         let filters = filter_list(&self.journal.plan.interface.name, "ingress")?;
+        if values(&filters)
+            .filter(|v| v.get("options").is_some())
+            .any(|v| {
+                !v["pref"].as_u64().is_some_and(|p| {
+                    self.journal
+                        .filters
+                        .iter()
+                        .any(|owned| u64::from(*owned) == p)
+                }) || !v.to_string().contains(&self.journal.token)
+            })
+        {
+            return Err(Error::Conflict(
+                "foreign ingress policy appeared during enforcement".into(),
+            ));
+        }
         for pref in &self.journal.filters {
             if !values(&filters).any(|v| {
                 v["pref"].as_u64() == Some(u64::from(*pref))
@@ -581,9 +620,29 @@ impl Session {
         Ok(())
     }
     pub async fn counters(&self) -> Result<Vec<(std::net::Ipv4Addr, EnforcementCounters)>> {
+        discovery::revalidate(&self.journal.plan).await?;
+        validate_routing_rules()?;
         self.verify()?;
         let ups = crate::classes::read(&self.journal.up).await?;
         let downs = crate::classes::read(&self.journal.down).await?;
+        for (classes, upload) in [(&ups, true), (&downs, false)] {
+            let expected = self
+                .journal
+                .plan
+                .targets
+                .iter()
+                .filter(|t| {
+                    if upload {
+                        t.policy.upload_bps.is_some()
+                    } else {
+                        t.policy.download_bps.is_some()
+                    }
+                })
+                .count();
+            if classes.len() != expected {
+                return Err(Error::Conflict("unexpected HTB class inventory".into()));
+            }
+        }
         let mut output = vec![];
         for (idx, t) in self.journal.plan.targets.iter().enumerate() {
             let mut c = EnforcementCounters {

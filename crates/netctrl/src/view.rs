@@ -224,7 +224,7 @@ pub fn render(f: &mut Frame, a: &App) {
                 Constraint::Length(10),
                 Constraint::Length(9),
                 Constraint::Length(9),
-                Constraint::Length(18),
+                Constraint::Length(24),
             ],
         )
         .header(

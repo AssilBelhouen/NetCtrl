@@ -7,7 +7,7 @@ use crate::{
 use netctrl_core::*;
 use netctrl_engine::*;
 use std::{
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -110,6 +110,18 @@ fn start_time(pid: u32) -> Result<String> {
         .ok_or_else(|| Error::Backend("process identity missing".into()))
 }
 fn watchdog(pid: u32, identity: String) -> Result<()> {
+    // The internal entry point must never become an arbitrary privileged kill API.
+    // SAFETY: getppid has no arguments or preconditions.
+    if pid != unsafe { libc::getppid() } as u32
+        || std::fs::read_link(format!("/proc/{pid}/exe"))? != std::env::current_exe()?
+        || start_time(pid)? != identity
+    {
+        return Err(Error::Permission(
+            "watchdog must be a direct child of this helper".into(),
+        ));
+    }
+    std::io::stdout().write_all(b"NETCTRL_WATCHDOG_1\n")?;
+    std::io::stdout().flush()?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut input = std::io::stdin();
@@ -196,9 +208,30 @@ async fn service() -> Result<()> {
             &start_time(std::process::id())?,
         ])
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()?;
+    let ready = guard
+        .stdout
+        .take()
+        .ok_or_else(|| Error::Backend("watchdog handshake pipe missing".into()))?;
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let result = BufReader::new(ready)
+            .take(64)
+            .read_line(&mut line)
+            .map(|_| line);
+        let _ = ready_tx.send(result);
+    });
+    if !matches!(ready_rx.recv_timeout(Duration::from_secs(3)), Ok(Ok(line)) if line == "NETCTRL_WATCHDOG_1\n")
+    {
+        let _ = guard.kill();
+        let _ = guard.wait();
+        return Err(Error::Backend(
+            "watchdog did not complete its parent authentication handshake".into(),
+        ));
+    }
     let mut guard_input = guard
         .stdin
         .take()
@@ -285,7 +318,7 @@ async fn service() -> Result<()> {
    }},
    _=tick.tick()=>{
     if session::now_millis().saturating_sub(heartbeat.load(Ordering::Relaxed))>5000 || guard.try_wait()?.is_some(){quitting=true;}
-    if let Some(s)=&current {match s.counters().await{Ok(c)=>emit(&out,Event::Counters(c))?,Err(e)=>{emit(&out,Event::Error(e.to_string()))?;quitting=true;}}}
+    if let Some(s)=&current {match s.counters().await{Ok(c)=>emit(&out,Event::Counters(c))?,Err(e)=>{if let Some(w)=worker.take(){w.stop();}generation+=1;if let Some(mut s)=current.take(){s.recover()?;}emit(&out,Event::Recovered)?;emit(&out,Event::Error(e.to_string()))?;}}}
    }
   }
  }
@@ -310,4 +343,18 @@ async fn service() -> Result<()> {
     let _ = pulse.join();
     let _ = guard.wait();
     result.and(recovery)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn internal_watchdog_rejects_an_unrelated_process() -> Result<()> {
+        let pid = std::process::id();
+        assert!(matches!(
+            watchdog(pid, start_time(pid)?),
+            Err(Error::Permission(_))
+        ));
+        Ok(())
+    }
 }

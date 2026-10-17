@@ -277,9 +277,16 @@ impl App {
             }
             Event::Counters(c) => self.enforcement = c.into_iter().collect(),
             Event::Recovered => {
+                self.needs_observe = self.sim.is_none();
                 self.active = false;
                 self.scan_running = false;
                 self.enforcement.clear();
+                let host = self.interface().and_then(|i| i.mac);
+                for (id, t) in &mut self.traffic.entries {
+                    if Some(id.mac) != host {
+                        t.observable = false;
+                    }
+                }
                 self.message =
                     "Owned network state restored; remote ARP correction is best effort".into();
             }

@@ -91,7 +91,16 @@ async fn run() -> Result<()> {
                         std::process::Command::new("/usr/local/libexec/netctrl/netctrl-capture")
                             .arg("--check")
                             .output();
-                    let data = serde_json::json!({"interfaces":ifaces,"capabilities":netctrl_linux::system::capabilities(),"helper_installed":std::path::Path::new(client::HELPER).is_file(),"libpcap":capture.map(|o|String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_else(|e|e.to_string()),"note":"Privilege-dependent capabilities are evaluated again by the installed helper; live support also requires topology and firewall preflight."});
+                    let pcap = match capture {
+                        Ok(o) if o.status.success() => {
+                            serde_json::json!({"available":true,"details":String::from_utf8_lossy(&o.stdout).trim()})
+                        }
+                        Ok(o) => {
+                            serde_json::json!({"available":false,"details":String::from_utf8_lossy(&o.stderr).trim(),"exit":o.status.code()})
+                        }
+                        Err(e) => serde_json::json!({"available":false,"details":e.to_string()}),
+                    };
+                    let data = serde_json::json!({"interfaces":ifaces,"capabilities":netctrl_linux::system::capabilities(),"helper_installed":std::path::Path::new(client::HELPER).is_file(),"libpcap":pcap,"note":"Privilege-dependent capabilities are evaluated again by the installed helper; live support also requires topology and firewall preflight."});
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&data)
@@ -252,8 +261,14 @@ async fn event_loop(
           if let Some(resolver)=&resolver&& a.sim.is_none(){let candidates:Vec<_>=a.devices().iter().filter(|d|d.hostname.is_none()&&!a.dns_queued.contains(&d.id)).take(8).map(|d|(d.id,d.addresses.first().copied())).collect();for(id,ip)in candidates {if let Some(ip)=ip {a.dns_queued.insert(id);let resolver=resolver.clone();let tx=resolved_tx.clone();let semaphore=permits.clone();tokio::spawn(async move{let Ok(_permit)=semaphore.acquire_owned().await else{return;};let name=tokio::time::timeout(Duration::from_secs(2),resolver.reverse_lookup(ip)).await.ok().and_then(|r|r.ok()).and_then(|r|r.answers().first().map(|r|r.data.to_string()));let _=tx.send((id,name)).await;});}}}
          },
          event=events.next()=>{match event{Some(Ok(TerminalEvent::Key(k)))=>{match a.key(k){Ok(requests)=>{for r in requests{if let Some(c)=helper.as_ref(){if let Err(e)=c.send(r){a.scan_running=false;a.message=e.to_string();}}else{a.scan_running=false;a.message="Privileged helper unavailable; run doctor and follow installation instructions".into();}}},Err(e)=>a.message=e.to_string()}},Some(Err(e))=>return Err(e.into()),None=>break,_=>{}}},
-         e=async {if let Some(c)=helper.as_mut(){c.events.recv().await}else{std::future::pending::<Option<Event>>().await}}=>{if let Some(e)=e{a.event(e);}},
-         _=neighbor_tick.tick()=>{if a.sim.is_none()&& let Some(i)=a.interface(){let index=i.index;match neighbors(index).await{Ok(ns)=>for p in ns{a.observe_peer(p)},Err(e)=>a.message=e.to_string()}}},
+         e=async {if let Some(c)=helper.as_mut(){c.events.recv().await}else{std::future::pending::<Option<Event>>().await}}=>{match e{Some(e)=>a.event(e),None=>return Err(Error::Backend("privileged helper disconnected; watchdog recovery is pending; run netctrl recover if required".into()))}},
+         _=neighbor_tick.tick()=>{if a.sim.is_none(){
+          if !a.active {match interfaces().await {
+           Ok(current) if current!=a.interfaces=>{let selected=a.interface().map(|i|i.index);a.interface_index=current.iter().position(|i|Some(i.index)==selected).unwrap_or(0);a.interfaces=current;a.needs_observe=true;},
+           Err(e)=>a.message=e.to_string(),_=>{}
+          }}
+          if let Some(i)=a.interface(){let index=i.index;match neighbors(index).await{Ok(ns)=>for p in ns{a.observe_peer(p)},Err(e)=>a.message=e.to_string()}}
+         }},
          Some((id,name))=resolved_rx.recv()=>{if let Some(d)=a.registry.get_mut(id){d.hostname=name.map(|s|sanitize(&s));}},
          _=tokio::signal::ctrl_c()=>break,
         }

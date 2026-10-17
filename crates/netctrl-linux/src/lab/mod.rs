@@ -552,6 +552,52 @@ async fn controller(prefix: &str) -> Result<()> {
         "ping",
         &["-c", "1", "-W", "2", "10.77.0.1"],
     )?;
+    // Receive a datagram larger than the controller egress MTU. The kernel must
+    // fragment when allowed and report failure for DF without breaking small traffic.
+    command(
+        "ip",
+        &args(&[
+            "route",
+            "add",
+            "198.18.0.1/32",
+            "via",
+            "10.77.0.1",
+            "dev",
+            "nc0",
+            "mtu",
+            "1200",
+        ]),
+    )?;
+    net(
+        &format!("{prefix}-a"),
+        "ping",
+        &[
+            "-c",
+            "1",
+            "-W",
+            "2",
+            "-s",
+            "1300",
+            "-M",
+            "dont",
+            "198.18.0.1",
+        ],
+    )?;
+    check(
+        net(
+            &format!("{prefix}-a"),
+            "ping",
+            &["-c", "1", "-W", "2", "-s", "1300", "-M", "do", "198.18.0.1"],
+        )
+        .is_err(),
+        "oversized DF packet unexpectedly passed",
+    )?;
+    command("ip", &args(&["route", "del", "198.18.0.1/32"]))?;
+    net(
+        &format!("{prefix}-a"),
+        "ping",
+        &["-c", "1", "-W", "2", "198.18.0.1"],
+    )?;
     for (label, up, down) in [("a", 2_000_000, 4_000_000), ("b", 1_000_000, 3_000_000)] {
         throughput(prefix, label, false, Some(up))?;
         throughput(prefix, label, true, Some(down))?;
@@ -604,11 +650,12 @@ async fn controller(prefix: &str) -> Result<()> {
         .recv_timeout(Duration::from_secs(8))
         .map_err(|e| Error::Backend(e.to_string()))?;
     // Some queued control events may precede the mapping notification.
-    let mut mapping = matches!(&e,Event::Error(s) if s.contains("mapping changed"));
+    let mut mapping =
+        matches!(&e,Event::Error(s) if (s.contains("mapping") && s.contains("changed")));
     let deadline = Instant::now() + Duration::from_secs(5);
     while !mapping && Instant::now() < deadline {
         if let Ok(Event::Error(s)) = h.events.recv_timeout(Duration::from_secs(1)) {
-            mapping = s.contains("mapping changed");
+            mapping = s.contains("mapping") && s.contains("changed");
         }
     }
     check(mapping, "IP/MAC change did not suspend enforcement")?;

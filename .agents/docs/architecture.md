@@ -2,9 +2,9 @@
 
 ```mermaid
 flowchart LR
-    UI[Unprivileged Ratatui UI] -->|Versioned JSON lines over inherited pipes| H[Installed root helper]
+    UI[Unprivileged Ratatui UI] <-->|Versioned JSON lines over inherited pipes| H[Installed root helper]
     H --> W[Installed libpcap worker]
-    W -->|Visible packet summaries and ARP observations| UI
+    W -->|Visible packet summaries and ARP observations| H
     H --> J[Durable namespace journal]
     H --> G[Independent watchdog]
     H --> K[Kernel forwarding / iptables-nft / tc]
@@ -28,7 +28,7 @@ The application never restores Manage merely because it was saved. Prepare indep
 
 The helper and worker are built as a normal user and installed root-owned in `/usr/local/libexec/netctrl`. The UI uses sudo only for that installed helper. Tool paths come from a fixed allowlist and arguments are separate strings. Installed executable ancestry must be root-owned and not writable by other users.
 
-For each plan the helper checks active Ethernet framing, all controller addresses, gateway identity, unique client identities, local subnet containment and selected default route. It refuses foreign ingress filters and competing native nftables forwarding base chains. Queue installation preserves the physical root qdisc. Readback checks classifier cookies, owned firewall rules/hooks, IFB aliases, HTB rates/ceilings and forwarding state. Backend installation and observed use are separate statuses.
+For each plan the helper checks active Ethernet framing, all controller addresses, gateway identity, unique client identities, local subnet containment and selected default route. It refuses foreign ingress filters and competing native nftables forwarding base chains. Queue installation preserves the physical root qdisc. Readback checks classifier cookies and inventory, owned firewall rules/hooks, IFB aliases, HTB rates/ceilings and forwarding state. Interface/neighbor/route validation repeats while enforcement is active; custom IPv4 routing rules are refused. Owned IFBs accept large packets until the kernel applies the physical egress or route MTU. Backend installation and observed use are separate statuses.
 
 ## Transactions and recovery
 
@@ -36,7 +36,7 @@ For each plan the helper checks active Ethernet framing, all controller addresse
 
 Recovery removes owned ingress redirection, repairs endpoint ARP mappings while forwarding remains enabled briefly, removes owned queues and scoped firewall rules, then restores forwarding. Exact rule readback detects changes during enforcement. Cleanup checks ownership again, preserves foreign objects and retains the journal with explicit conflict diagnostics. Repeating recovery is safe. Externally removing a whole object is tolerated; inserting foreign rules into an owned chain requires administrative inspection.
 
-A separate watchdog inherits only a heartbeat pipe and the network namespace. It verifies the helper's PID plus process start time before terminating a stalled helper. UI request silence is bounded at five seconds; the watchdog heartbeat deadline is six seconds. Successful cleanup explicitly disarms it. Power loss prevents immediate remote ARP repair; remote caches may need expiry or manual refresh.
+A separate watchdog inherits only a heartbeat pipe and the network namespace. A startup handshake authenticates its direct helper parent. It verifies the helper's PID plus process start time before terminating a stalled helper. UI request silence is bounded at five seconds; the watchdog heartbeat deadline is six seconds. Successful cleanup explicitly disarms it. Power loss prevents immediate remote ARP repair; remote caches may need expiry or manual refresh.
 
 ## Tests
 
