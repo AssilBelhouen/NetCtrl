@@ -1,0 +1,22 @@
+[package]
+name = "netctrl-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+netctrl-core.workspace = true
+netctrl-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+rtnetlink = "0.20"
+netlink-packet-route = "0.28"
+netlink-packet-core = "0.8"
+futures-util = "0.3"
+libc.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+[dev-dependencies]
+tempfile = "3"
+[lints]
+workspace = true

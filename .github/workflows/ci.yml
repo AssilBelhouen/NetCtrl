@@ -1,0 +1,54 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Native dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libpcap-dev iproute2 iptables nftables iperf3 iputils-ping
+          if ! modinfo ifb >/dev/null 2>&1; then
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+          fi
+      - name: Stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add rustfmt clippy
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: netctrl-${{ runner.os }}-${{ matrix.os }}-${{ hashFiles('Cargo.lock') }}
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo build --workspace --release --locked
+      - name: Install verified test executables
+        run: |
+          sudo install -d -o root -g root -m 0755 /usr/local/libexec/netctrl
+          sudo install -o root -g root -m 0755 target/release/netctrl-helper target/release/netctrl-capture target/release/netctrl-lab /usr/local/libexec/netctrl/
+      - name: Isolated privileged integration and bandwidth measurements
+        run: sudo /usr/local/libexec/netctrl/netctrl-lab
+      - name: Demo rendering
+        run: target/release/netctrl --demo --snapshot

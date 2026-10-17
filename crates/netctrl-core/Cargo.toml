@@ -1,0 +1,17 @@
+[package]
+name = "netctrl-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ipnet.workspace = true
+toml = "0.9"
+etherparse = "0.21"
+[dev-dependencies]
+tempfile = "3"
+[lints]
+workspace = true

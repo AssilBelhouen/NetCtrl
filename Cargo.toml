@@ -1,0 +1,31 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "LicenseRef-Proprietary"
+
+[workspace.dependencies]
+netctrl-core = { path = "crates/netctrl-core" }
+netctrl-engine = { path = "crates/netctrl-engine" }
+netctrl-linux = { path = "crates/netctrl-linux" }
+netctrl-sim = { path = "crates/netctrl-sim" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "io-util", "io-std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+ipnet = { version = "2", features = ["serde"] }
+libc = "0.2"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

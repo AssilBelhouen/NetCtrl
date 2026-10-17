@@ -1,0 +1,23 @@
+[package]
+name = "netctrl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+netctrl-core.workspace = true
+netctrl-engine.workspace = true
+netctrl-sim.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures-util = "0.3"
+hickory-resolver = "0.26"
+clap = { version = "4", features = ["derive"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+netctrl-linux.workspace = true
+libc.workspace = true
+[lints]
+workspace = true
